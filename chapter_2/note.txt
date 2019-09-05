@@ -32,3 +32,14 @@
     * tf.train.MonitoredTrainingSession
     * tf.ConfigProto
 
+    * tf.gfile文件操作
+    * tf.contrib.framework.get_or_create_global_step()
+        * Q: 怎么算是一个step?
+
+    * tf.cast
+
+    * tf.train.string_input_producer
+    * tf.FixedLengthRecordReader
+    * tf.decode_raw
+    * tf.strided_slice
+        * Q: ??

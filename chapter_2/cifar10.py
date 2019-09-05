@@ -52,12 +52,9 @@ FLAGS = tf.app.flags.FLAGS
 # ----------------------------
 
 # Basic model parameters.
-tf.app.flags.DEFINE_integer('batch_size', 128,
-                            """Number of images to process in a batch.""")
-tf.app.flags.DEFINE_string('data_dir', '/tmp/cifar10_data',
-                           """Path to the CIFAR-10 data directory.""")
-tf.app.flags.DEFINE_boolean('use_fp16', False,
-                            """Train the model using fp16.""")
+tf.app.flags.DEFINE_integer('batch_size', 128, """Number of images to process in a batch.""")
+tf.app.flags.DEFINE_string('data_dir', '/tmp/cifar10_data', """Path to the CIFAR-10 data directory.""")
+tf.app.flags.DEFINE_boolean('use_fp16', False, """Train the model using fp16.""")
 
 # Global constants describing the CIFAR-10 data set.
 
@@ -103,8 +100,7 @@ def _activation_summary(x):
   # session. This helps the clarity of presentation on tensorboard.
   tensor_name = re.sub('%s_[0-9]*/' % TOWER_NAME, '', x.op.name)
   tf.summary.histogram(tensor_name + '/activations', x)
-  tf.summary.scalar(tensor_name + '/sparsity',
-                                       tf.nn.zero_fraction(x))
+  tf.summary.scalar(tensor_name + '/sparsity', tf.nn.zero_fraction(x))
 
 
 #
@@ -122,7 +118,7 @@ def _variable_on_cpu(name, shape, initializer):
   Returns:
     Variable Tensor
   """
-  with tf.device('/gpu:0'):
+  with tf.device('/cpu:0'):
     dtype = tf.float16 if FLAGS.use_fp16 else tf.float32
     var = tf.get_variable(name, shape, initializer=initializer, dtype=dtype)
   return var
@@ -172,11 +168,21 @@ def distorted_inputs():
   Raises:
     ValueError: If no data_dir
   """
+
+  # 检查数据目录
   if not FLAGS.data_dir:
     raise ValueError('Please supply a data_dir')
+
+	# 数据目录
   data_dir = os.path.join(FLAGS.data_dir, 'cifar-10-batches-bin')
-  images, labels = cifar10_input.distorted_inputs(data_dir=data_dir,
-                                                  batch_size=FLAGS.batch_size)
+
+  # 从数据目录
+  # 读到数据
+  images, labels = cifar10_input.distorted_inputs(
+	  data_dir=data_dir,
+	  batch_size=FLAGS.batch_size		# 默认128
+  )
+	# 是否转换成float15
   if FLAGS.use_fp16:
     images = tf.cast(images, tf.float16)
     labels = tf.cast(labels, tf.float16)
@@ -336,7 +342,10 @@ def loss(logits, labels):
   # Calculate the average cross entropy loss across the batch.
   labels = tf.cast(labels, tf.int64)
   cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-      labels=labels, logits=logits, name='cross_entropy_per_example')
+      labels=labels,
+	  logits=logits,
+	  name='cross_entropy_per_example'
+  )
   cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
   tf.add_to_collection('losses', cross_entropy_mean)
 
@@ -390,9 +399,11 @@ def train(total_loss, global_step):
     train_op: op for training.
   """
   # Variables that affect learning rate.
-  # 一次epoch被分成多少batch = 一个epoch的5万数据 /  组成一个batch的个数
+  # 一次epoch被分成多少batch = 一个epoch的5万数据 /  组成一个batch的个数:128
+  # 结果: 一个epoch有, 390个batch
   num_batches_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN / FLAGS.batch_size
   # 多少次epoch学习速率衰减一次
+  # 一次batch计算，就是一次step
   decay_steps = int(num_batches_per_epoch * NUM_EPOCHS_PER_DECAY)
 
   # Decay the learning rate exponentially based on the number of steps.
@@ -426,7 +437,9 @@ def train(total_loss, global_step):
 
   # Track the moving averages of all trainable variables.
   variable_averages = tf.train.ExponentialMovingAverage(
-      MOVING_AVERAGE_DECAY, global_step)
+      MOVING_AVERAGE_DECAY,
+	  global_step
+  )
   variables_averages_op = variable_averages.apply(tf.trainable_variables())
 
   with tf.control_dependencies([apply_gradient_op, variables_averages_op]):
