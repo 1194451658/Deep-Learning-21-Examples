@@ -47,6 +47,10 @@ import cifar10_input
 
 FLAGS = tf.app.flags.FLAGS
 
+# ----------------------------
+#	定义命令行选项
+# ----------------------------
+
 # Basic model parameters.
 tf.app.flags.DEFINE_integer('batch_size', 128,
                             """Number of images to process in a batch.""")
@@ -56,9 +60,16 @@ tf.app.flags.DEFINE_boolean('use_fp16', False,
                             """Train the model using fp16.""")
 
 # Global constants describing the CIFAR-10 data set.
+
+# 处理后的大小24*24
 IMAGE_SIZE = cifar10_input.IMAGE_SIZE
+
+# 分成的类别，10
 NUM_CLASSES = cifar10_input.NUM_CLASSES
+
+# 5万
 NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = cifar10_input.NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
+# 1万
 NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = cifar10_input.NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
 
 
@@ -76,6 +87,7 @@ TOWER_NAME = 'tower'
 DATA_URL = 'http://www.cs.toronto.edu/~kriz/cifar-10-binary.tar.gz'
 
 
+# Q: summary是什么操作？
 def _activation_summary(x):
   """Helper to create summaries for activations.
 
@@ -95,6 +107,10 @@ def _activation_summary(x):
                                        tf.nn.zero_fraction(x))
 
 
+#
+# 使用get_variable()函数
+# 从CPU上创建变量
+#
 def _variable_on_cpu(name, shape, initializer):
   """Helper to create a Variable stored on CPU memory.
 
@@ -106,12 +122,17 @@ def _variable_on_cpu(name, shape, initializer):
   Returns:
     Variable Tensor
   """
-  with tf.device('/cpu:0'):
+  with tf.device('/gpu:0'):
     dtype = tf.float16 if FLAGS.use_fp16 else tf.float32
     var = tf.get_variable(name, shape, initializer=initializer, dtype=dtype)
   return var
 
 
+#
+# 调用_variable_on_cpu，在cpu上创建变量
+# 使用truncated_normal_initializer
+# l2正则化
+#
 def _variable_with_weight_decay(name, shape, stddev, wd):
   """Helper to create an initialized Variable with weight decay.
 
@@ -128,6 +149,8 @@ def _variable_with_weight_decay(name, shape, stddev, wd):
   Returns:
     Variable Tensor
   """
+
+  # 使用float还是double
   dtype = tf.float16 if FLAGS.use_fp16 else tf.float32
   var = _variable_on_cpu(
       name,
@@ -184,7 +207,8 @@ def inputs(eval_data):
     labels = tf.cast(labels, tf.float16)
   return images, labels
 
-
+# 创建模型
+# 由cifar10_train.py创建过来
 def inference(images):
   """Build the CIFAR-10 model.
 
@@ -201,22 +225,40 @@ def inference(images):
   #
   # conv1
   with tf.variable_scope('conv1') as scope:
+
+	# 调用_variable_on_cpu，在cpu上创建变量
+	# 使用truncated_normal_initializer
+	# l2正则化
     kernel = _variable_with_weight_decay('weights',
                                          shape=[5, 5, 3, 64],
                                          stddev=5e-2,
                                          wd=0.0)
+	#	-------------------------
+	# 		第一层卷积
+	# 		64个卷积核
+	# 		卷积核大小[5, 5, 3]
+	#	-------------------------
     conv = tf.nn.conv2d(images, kernel, [1, 1, 1, 1], padding='SAME')
+
+	# 偏移和激活
     biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.0))
     pre_activation = tf.nn.bias_add(conv, biases)
     conv1 = tf.nn.relu(pre_activation, name=scope.name)
+
+	# Q: summary是什么操作？
     _activation_summary(conv1)
 
   # pool1
-  pool1 = tf.nn.max_pool(conv1, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
-                         padding='SAME', name='pool1')
+  pool1 = tf.nn.max_pool(conv1, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1], padding='SAME', name='pool1')
   # norm1
-  norm1 = tf.nn.lrn(pool1, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75,
-                    name='norm1')
+
+	# Q: ????
+  # Local Response Normalization. ???
+  norm1 = tf.nn.lrn(pool1, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75, name='norm1')
+
+	#	-----------------
+	# 		第二层卷积
+	#	-----------------
 
   # conv2
   with tf.variable_scope('conv2') as scope:
@@ -230,13 +272,18 @@ def inference(images):
     conv2 = tf.nn.relu(pre_activation, name=scope.name)
     _activation_summary(conv2)
 
+	# Q: 第二层的卷积中
+	# 怎么lrn在max_pool之前？
+
   # norm2
   norm2 = tf.nn.lrn(conv2, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75,
                     name='norm2')
   # pool2
   pool2 = tf.nn.max_pool(norm2, ksize=[1, 3, 3, 1],
                          strides=[1, 2, 2, 1], padding='SAME', name='pool2')
-
+	#	-----------------------
+	#		全连接层1
+	#	-----------------------
   # local3
   with tf.variable_scope('local3') as scope:
     # Move everything into depth so we can perform a single matrix multiply.
@@ -248,6 +295,9 @@ def inference(images):
     local3 = tf.nn.relu(tf.matmul(reshape, weights) + biases, name=scope.name)
     _activation_summary(local3)
 
+	#	-----------------------
+	#		全连接层2
+	#	-----------------------
   # local4
   with tf.variable_scope('local4') as scope:
     weights = _variable_with_weight_decay('weights', shape=[384, 192],
@@ -295,6 +345,7 @@ def loss(logits, labels):
   return tf.add_n(tf.get_collection('losses'), name='total_loss')
 
 
+# Q: summary是什么处理？
 def _add_loss_summaries(total_loss):
   """Add summaries for losses in CIFAR-10 model.
 
@@ -306,6 +357,8 @@ def _add_loss_summaries(total_loss):
   Returns:
     loss_averages_op: op for generating moving averages of losses.
   """
+
+  # Q: ???这个是在干什么？
   # Compute the moving average of all individual losses and the total loss.
   loss_averages = tf.train.ExponentialMovingAverage(0.9, name='avg')
   losses = tf.get_collection('losses')
@@ -322,6 +375,7 @@ def _add_loss_summaries(total_loss):
   return loss_averages_op
 
 
+# 由cifar10_train调用过来
 def train(total_loss, global_step):
   """Train CIFAR-10 model.
 
@@ -336,17 +390,20 @@ def train(total_loss, global_step):
     train_op: op for training.
   """
   # Variables that affect learning rate.
+  # 一次epoch被分成多少batch = 一个epoch的5万数据 /  组成一个batch的个数
   num_batches_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN / FLAGS.batch_size
+  # 多少次epoch学习速率衰减一次
   decay_steps = int(num_batches_per_epoch * NUM_EPOCHS_PER_DECAY)
 
   # Decay the learning rate exponentially based on the number of steps.
-  lr = tf.train.exponential_decay(INITIAL_LEARNING_RATE,
-                                  global_step,
-                                  decay_steps,
-                                  LEARNING_RATE_DECAY_FACTOR,
+  lr = tf.train.exponential_decay(INITIAL_LEARNING_RATE,		# 0.1
+                                  global_step,					# 运行了多少次了
+                                  decay_steps,					# 多少次batch之后，衰减一次
+                                  LEARNING_RATE_DECAY_FACTOR,	# 衰减参数
                                   staircase=True)
   tf.summary.scalar('learning_rate', lr)
 
+	# Q: summary是什么处理？
   # Generate moving averages of all losses and associated summaries.
   loss_averages_op = _add_loss_summaries(total_loss)
 
@@ -380,20 +437,31 @@ def train(total_loss, global_step):
 
 def maybe_download_and_extract():
   """Download and extract the tarball from Alex's website."""
+  # 数据存储目录
   dest_directory = FLAGS.data_dir
   if not os.path.exists(dest_directory):
     os.makedirs(dest_directory)
+
+	# 数据文件名
   filename = DATA_URL.split('/')[-1]
   filepath = os.path.join(dest_directory, filename)
+
+  # 如果没有数据文件
+  # 则进行下载
   if not os.path.exists(filepath):
+  	# 显示下载进度
     def _progress(count, block_size, total_size):
       sys.stdout.write('\r>> Downloading %s %.1f%%' % (filename,
           float(count * block_size) / float(total_size) * 100.0))
       sys.stdout.flush()
+
+	# 进行下载
     filepath, _ = urllib.request.urlretrieve(DATA_URL, filepath, _progress)
     print()
+	# 打印下载成功
     statinfo = os.stat(filepath)
     print('Successfully downloaded', filename, statinfo.st_size, 'bytes.')
+	# 进行解压
   extracted_dir_path = os.path.join(dest_directory, 'cifar-10-batches-bin')
   if not os.path.exists(extracted_dir_path):
     tarfile.open(filepath, 'r:gz').extractall(dest_directory)

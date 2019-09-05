@@ -3,6 +3,8 @@ import tensorflow as tf
 from tensorflow.examples.tutorials.mnist import input_data
 
 
+# 带上，截断正态分布初始化的
+# tf.Variable
 def weight_variable(shape):
     initial = tf.truncated_normal(shape, stddev=0.1)
     return tf.Variable(initial)
@@ -29,35 +31,83 @@ if __name__ == '__main__':
     x = tf.placeholder(tf.float32, [None, 784])
     y_ = tf.placeholder(tf.float32, [None, 10])
 
-    # 将单张图片从784维向量重新还原为28x28的矩阵图片
+    # 将单张图片从784维向量重新还原为28x28x1的矩阵图片
+	# * 这里是变成了一个3维图片?
+	#	* 因为conv2d函数，接收的输入，要求一个4维
+	# 
     x_image = tf.reshape(x, [-1, 28, 28, 1])
 
-    # 第一层卷积层
+	#	-------------------
+    # 		第一层卷积层
+	#	-------------------
+
+	#	-------------------
+	# 		卷结核大小
+	# 		高5，宽5，channel：1
+	# 		输出channel:32
+	#	-------------------
     W_conv1 = weight_variable([5, 5, 1, 32])
+
+	# 32个输出的偏置
     b_conv1 = bias_variable([32])
+
+	# conv2d默认的padding是SAME
+	# 输出形状：None, 28, 28, 32
     h_conv1 = tf.nn.relu(conv2d(x_image, W_conv1) + b_conv1)
+
+
+	# 输出形状：None, 14, 14, 32
     h_pool1 = max_pool_2x2(h_conv1)
 
-    # 第二层卷积层
+	#	------------------------
+    # 		第二层卷积层
+	#		输出channel: 64
+	#	------------------------
     W_conv2 = weight_variable([5, 5, 32, 64])
     b_conv2 = bias_variable([64])
+
+	# 输出形状：None, 14, 14, 64
     h_conv2 = tf.nn.relu(conv2d(h_pool1, W_conv2) + b_conv2)
+
+	# 输出形状：None, 7, 7, 64
     h_pool2 = max_pool_2x2(h_conv2)
+
+	#	---------------------------------
+	#  扁平化卷积网络的输出
+	#	连接到一个1024输出的，全连接层
+	#	---------------------------------
 
     # 全连接层，输出为1024维的向量
     W_fc1 = weight_variable([7 * 7 * 64, 1024])
     b_fc1 = bias_variable([1024])
+
+	# 扁平化
     h_pool2_flat = tf.reshape(h_pool2, [-1, 7 * 7 * 64])
+
     h_fc1 = tf.nn.relu(tf.matmul(h_pool2_flat, W_fc1) + b_fc1)
-    # 使用Dropout，keep_prob是一个占位符，训练时为0.5，测试时为1
+
+	# 	--------------------------------------
+    # 	使用Dropout
+	# 	keep_prob是一个占位符，训练时为0.5，测试时为1
+	#	----------------------------------------
     keep_prob = tf.placeholder(tf.float32)
     h_fc1_drop = tf.nn.dropout(h_fc1, keep_prob)
+
+	#	------------------------
+	#		再一个，再一个全连接层
+	#		输出变成10
+	#	------------------------
 
     # 把1024维的向量转换成10维，对应10个类别
     W_fc2 = weight_variable([1024, 10])
     b_fc2 = bias_variable([10])
     y_conv = tf.matmul(h_fc1_drop, W_fc2) + b_fc2
 
+	#	--------------------------
+	# 		Softmax回归
+	#		具体过程，参见softmax_regression
+	#		这里直接调用了ft的封装函数
+	#	----------------------------
     # 我们不采用先Softmax再计算交叉熵的方法，而是直接用tf.nn.softmax_cross_entropy_with_logits直接计算
     cross_entropy = tf.reduce_mean(
         tf.nn.softmax_cross_entropy_with_logits(labels=y_, logits=y_conv))
